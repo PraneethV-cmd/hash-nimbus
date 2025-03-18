@@ -22,7 +22,7 @@ import (
 // <------------------>
 
 type StateMachine struct {
-	db	*sync.Map //the map used here is for conncurrent synchronized key value storage
+	db	*sync.Map //the map used here is for conncurrent sync key value storage
 	server	int 
 }
 
@@ -35,6 +35,14 @@ type Command struct {
 type HTTPServer struct {
 	raft	*protoraft.Server
 	db	*sync.Map
+}
+
+type Config struct {
+	cluster []protoraft.ClusterMember 
+	index	int
+	id	string
+	address string 
+	http	string
 }
 
 type CommandKind uint8 
@@ -125,4 +133,108 @@ func(hs HTTPServer) setHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Could not write key-value: %s", err)
 		return
 	}
+}
+
+func(hs HTTPServer) getHandler(w http.ResponseWriter, r *http.Request) {
+	var c Command 
+	c.kind = getCommand
+	c.key = r.URL.Query().Get("key")
+
+	var value []byte 
+	var err error 
+	if r.URL.Query().Get("relaxed") == "true" {
+		v, ok := hs.db.Load(c.key)
+		if !ok {
+			err = fmt.Errorf("key not found")
+		} else {
+			value = []byte(v.(string))
+		}
+	} else {
+		var results []protoraft.ApplyResult 
+		results, err = hs.raft.Apply([][]byte{encodeCommand(c)})
+		if err == nil {
+			if len(results) != 1 {
+				err = fmt.Errorf("Expected single response from raft, got: %d.", len(results))
+			} else if results[0].Error != nil {
+				err = results[0].Error 
+			} else {
+				value = results[0].Result
+			}
+		}
+	}
+
+	if err != nil {
+		log.Printf("Could not encode Key-Value in HTTP response: %s", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	written := 0 
+	for written < len(value) {
+		n, err := w.Write(value[written:])
+		if err != nil {
+			log.Printf("Could not encode Key Value in HTTP response: %s", err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return 
+		}
+		written += n
+	}
+}
+
+func getConfig() Config {
+	cfg := Config{} 
+	var node string 
+	for i, arg := range os.Args[1:] {
+		if arg == "--node" {
+			var err error 
+			node = os.Args[i+2] 
+			cfg.index, err = strconv.Atoi(node)
+			if err != nil {
+				log.Fatal("Expecteed $value to be value integer in `--node $value`, got: %s", node)
+			}
+			i++ 
+			continue
+		}
+		if arg == "--http" {
+			cfg.http = os.Args[i+2] 
+			i++
+			continue
+		}
+
+		if arg == "--cluster" {
+			cluster := os.Args[i+2]
+			var clusterEntry protoraft.ClusterMember
+			for _, part := range strings.Split(cluster, ",") {
+				idAddress := strings.Split(part, ",")
+				var err error 
+				clusterEntry.Id, err = strconv.ParseUint(idAddress[0], 10, 64)
+				if err != nil {
+					log.Fatal("Expectedm$id to be valid integer in `--cluster $id, $ip`, got: %s", idAddress[0])
+				}
+
+				clusterEntry.Address = idAddress[1] 
+				cfg.cluster = append(cfg.cluster, clusterEntry)
+			}
+
+			i++
+			continue
+		}
+	}
+
+	if node == "" {
+		log.Fatal("Missing required parameter: --node $index")
+	}
+
+	if cfg.http == "" {
+		log.Fatal("Missing required parameter: --http $address")
+	}
+
+	if len(cfg.cluster) == 0 {
+		log.Fatal("Missing required parameter: --cluster $node1Id, $node1Address;...;$nodeNId, $nodeNAddress")
+	}
+	return cfg
+}
+
+func main() {
+	
 }
