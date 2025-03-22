@@ -235,6 +235,31 @@ func getConfig() Config {
 	return cfg
 }
 
-func main() {
-	
+func main() {	
+	var b [8]byte 
+	_, err := crypto.Read(b[:])
+	if err != nil {
+		panic("Cannot seed math/rand package with cryptoraphcially secure random number generator")
+	}
+	rand.Seed(int64(binary.LittleEndian.Uint64(b[:])))
+
+	cfg := getConfig() 
+
+	var db sync.Map 
+
+	var sm StateMachine
+	sm.db = &db 
+	sm.server = cfg.index 
+
+	s := protoraft.NewServer(cfg.cluster, &sm, ".", cfg.index)
+	go s.Start()
+
+	hs := HTTPServer{s, &db}
+
+	http.HandleFunc("/set", hs.setHandler)
+	http.HandleFunc("/get", hs.getHandler)
+	err = http.ListenAndServe(cfg.http, nil)
+	if err != nil {
+		panic(err)
+	}
 }
