@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/PraneethV-cmd/protoraft"
+	"github.com/PraneethV-cmd/hash-nimbus"
 )
 
 
@@ -204,7 +204,7 @@ func getConfig() Config {
 		if arg == "--cluster" {
 			cluster := os.Args[i+2]
 			var clusterEntry protoraft.ClusterMember
-			for _, part := range strings.Split(cluster, ",") {
+			for _, part := range strings.Split(cluster, ";") {
 				idAddress := strings.Split(part, ",")
 				var err error 
 				clusterEntry.Id, err = strconv.ParseUint(idAddress[0], 10, 64)
